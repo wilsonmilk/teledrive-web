@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<!--
+  Defesa em profundidade. script-src 'self' é o que importa: mesmo que um dia
+  entre uma falha de XSS, não dá para injetar script de fora nem usar eval.
+  connect-src fica largo de propósito — o GramJS conversa com vários data
+  centers do Telegram (wss://pluto, venus, aurora…) e apertar isso quebraria
+  a conexão sem aviso.
+-->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src 'self';
+  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+  font-src https://fonts.gstatic.com;
+  img-src 'self' data: blob:;
+  media-src 'self' blob:;
+  frame-src blob:;
+  connect-src 'self' wss: https:;
+  object-src 'none';
+  base-uri 'self';
+  form-action 'none';
+" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="TeleDrive" />
+<meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#11151a" media="(prefers-color-scheme: dark)" />
+<meta name="description" content="Seu canal privado do Telegram como nuvem pessoal, direto do navegador." />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icon-180.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap" rel="stylesheet" />
+<title>TeleDrive Web</title>
+</head>
+<body>
+
+<!-- ============================ entrada ============================ -->
+<div id="gate" class="gate">
+  <div class="gate-inner">
+    <h1 class="wordmark">Tele<span>Drive</span></h1>
+    <p class="lede">Seus arquivos num canal privado do seu Telegram. O navegador fala direto com o Telegram — não existe servidor no meio.</p>
+
+    <section id="s-creds" class="panel">
+      <h2>Conectar sua conta</h2>
+      <p class="hint">Use as credenciais do seu próprio aplicativo Telegram.</p>
+      <label class="field"><span>api_id</span>
+        <input id="apiId" type="text" inputmode="numeric" autocomplete="off" placeholder="1234567" />
+      </label>
+      <label class="field"><span>api_hash</span>
+        <input id="apiHash" type="text" autocomplete="off" placeholder="0123456789abcdef0123456789abcdef" />
+      </label>
+      <button id="btnCreds" class="btn block">Continuar</button>
+      <p class="footnote">
+        Pegue em <code>my.telegram.org</code>, em API development tools. Fica guardado
+        só neste navegador. Este app usa a API do Telegram e não é um produto oficial do Telegram.
+      </p>
+    </section>
+
+    <section id="s-phone" class="panel hide">
+      <h2>Seu número</h2>
+      <p class="hint">O Telegram vai mandar um código de confirmação.</p>
+      <label class="field"><span>Telefone com código do país</span>
+        <input id="phone" type="tel" autocomplete="tel" placeholder="+5565999999999" />
+      </label>
+      <button id="btnPhone" class="btn block">Enviar código</button>
+      <div id="mPhone" class="msg hide"></div>
+    </section>
+
+    <section id="s-code" class="panel hide">
+      <h2>Código de confirmação</h2>
+      <p class="hint">Chegou no seu aplicativo do Telegram.</p>
+      <label class="field"><span>Código</span>
+        <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="12345" />
+      </label>
+      <button id="btnCode" class="btn block">Confirmar</button>
+      <div id="mCode" class="msg hide"></div>
+    </section>
+
+    <section id="s-pass" class="panel hide">
+      <h2>Senha de duas etapas</h2>
+      <p class="hint">Sua senha da nuvem do Telegram, não o código.</p>
+      <label class="field"><span>Senha</span>
+        <input id="pass" type="password" autocomplete="current-password" />
+      </label>
+      <button id="btnPass" class="btn block">Entrar</button>
+      <div id="mPass" class="msg hide"></div>
+    </section>
+
+    <section id="s-boot" class="panel">
+      <h2>Reconectando</h2>
+      <p class="hint" id="bootHint">Retomando sua sessão…</p>
+    </section>
+  </div>
+</div>
+
+<!-- ============================= drive ============================= -->
+<div id="app" class="app hide">
+  <header class="topbar">
+    <div class="wordmark">Tele<span>Drive</span></div>
+    <div class="search">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
+        <circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/>
+      </svg>
+      <input id="q" type="search" placeholder="Buscar no drive" autocomplete="off" />
+    </div>
+    <div class="spacer"></div>
+    <button id="btnNewFolder" class="btn quiet" title="Nova pasta">
+      <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+        <path d="M2.5 5.5A1.5 1.5 0 0 1 4 4h3.2l1.6 2H16a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5z"/>
+        <path d="M10 9.5v4M8 11.5h4"/>
+      </svg>
+      <span class="lbl">Nova pasta</span>
+    </button>
+    <button id="btnUpload" class="btn" title="Enviar arquivos">
+      <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+        <path d="M10 13.5V4m0 0L6.5 7.5M10 4l3.5 3.5"/><path d="M3.5 13v2.5A1.5 1.5 0 0 0 5 17h10a1.5 1.5 0 0 0 1.5-1.5V13"/>
+      </svg>
+      <span class="lbl">Enviar</span>
+    </button>
+    <button id="btnAccount" class="btn bare" title="Conta e drive">
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+        <circle cx="10" cy="6.5" r="3"/><path d="M3.5 17c0-3.4 2.9-5.5 6.5-5.5s6.5 2.1 6.5 5.5"/>
+      </svg>
+    </button>
+  </header>
+
+  <nav class="crumbs" id="crumbs"></nav>
+
+  <div class="toolbar" id="toolbar">
+    <select id="sortBy" class="sortsel" aria-label="Ordenar por">
+      <option value="name">Nome</option>
+      <option value="modified">Modificação</option>
+      <option value="size">Tamanho</option>
+      <option value="kind">Tipo</option>
+    </select>
+    <button id="btnDir" class="btn quiet" title="Inverter ordem">Crescente</button>
+    <button id="btnView" class="btn quiet" title="Alternar lista e grade"></button>
+    <button id="btnUnlock" class="btn hide">Desbloquear</button>
+    <div class="spacer"></div>
+    <button id="btnFav" class="btn quiet">Favoritos</button>
+    <button id="btnTrash" class="btn quiet">Lixeira</button>
+    <button id="btnEmptyTrash" class="btn danger hide">Esvaziar lixeira</button>
+    <button id="btnReload" class="btn quiet">Atualizar</button>
+  </div>
+
+  <!-- barra que aparece quando há seleção -->
+  <div class="selbar hide" id="selbar">
+    <button class="btn bare" id="selClear" title="Limpar seleção"></button>
+    <strong id="selCount"></strong>
+    <div class="spacer"></div>
+    <button class="btn quiet" id="selDownload">Baixar</button>
+    <button class="btn quiet" id="selMove">Mover</button>
+    <button class="btn quiet" id="selFav">Favoritar</button>
+    <button class="btn quiet danger" id="selTrash">Lixeira</button>
+    <button class="btn quiet" id="selRestore" style="display:none">Restaurar</button>
+    <button class="btn danger" id="selDestroy" style="display:none">Apagar</button>
+  </div>
+
+  <div class="body">
+    <main class="sheet" id="sheet">
+      <div class="cols" id="cols">
+        <span class="chk"><input type="checkbox" id="checkAll" aria-label="Selecionar tudo" /></span>
+        <button data-sort="name">Nome</button>
+        <button data-sort="size" class="num">Tamanho</button>
+        <button data-sort="modified">Modificado</button>
+        <span></span>
+      </div>
+      <ul class="rows" id="rows"></ul>
+      <div class="grid hide" id="grid"></div>
+    </main>
+
+    <aside class="details hide" id="details">
+      <header>
+        <strong>Detalhes</strong>
+        <button class="btn bare" id="detClose" aria-label="Fechar"></button>
+      </header>
+      <div id="detBody"></div>
+    </aside>
+  </div>
+
+  <div class="statusbar" id="status"></div>
+</div>
+
+<input id="filePicker" type="file" multiple class="hide" />
+<input id="folderPicker" type="file" multiple webkitdirectory directory class="hide" />
+<input id="keyPicker" type="file" accept=".keybackup,application/octet-stream" class="hide" />
+
+<!-- transferências -->
+<aside id="xfer" class="xfer hide">
+  <header>
+    <span id="xferTitle">Transferências</span>
+    <span class="spacer"></span>
+    <button class="btn bare" id="xferCancelAll" title="Cancelar pendentes">Cancelar</button>
+    <button class="btn bare" id="xferClose" aria-label="Fechar"></button>
+  </header>
+  <ul id="xferList"></ul>
+</aside>
+
+<!-- visualizador -->
+<div id="viewer" class="viewer hide">
+  <header>
+    <strong id="viewerName"></strong>
+    <span class="spacer"></span>
+    <button class="btn quiet" id="viewerDownload">Baixar</button>
+    <button class="btn bare" id="viewerClose" aria-label="Fechar"></button>
+  </header>
+  <div class="viewer-body" id="viewerBody"></div>
+</div>
+
+<!-- diálogos -->
+<dialog id="dlgPrompt"><form method="dialog" class="dlg">
+  <h3 id="promptTitle">Título</h3>
+  <p class="hint" id="promptHint"></p>
+  <input id="promptInput" type="text" />
+  <div class="actions">
+    <button type="button" class="btn quiet js-cancel">Cancelar</button>
+    <button class="btn" id="promptOk" value="ok">Confirmar</button>
+  </div>
+</form></dialog>
+
+<dialog id="dlgMove"><form method="dialog" class="dlg">
+  <h3>Mover para</h3>
+  <p class="hint" id="moveHint"></p>
+  <ul class="tree" id="moveTree"></ul>
+  <button type="button" class="btn quiet" id="moveNewFolder">Criar pasta aqui</button>
+  <div class="actions">
+    <button type="button" class="btn quiet js-cancel">Cancelar</button>
+    <button class="btn" id="moveOk" value="ok">Mover</button>
+  </div>
+</form></dialog>
+
+<dialog id="dlgPass"><form method="dialog" class="dlg">
+  <h3 id="passTitle">Senha de criptografia</h3>
+  <p class="hint" id="passHint"></p>
+  <input id="passInput" type="password" autocomplete="off" />
+  <label class="check">
+    <input id="passRemember" type="checkbox" />
+    <span>Manter desbloqueado neste dispositivo</span>
+  </label>
+  <p class="warn" id="passWarn">Marcando isso, a chave fica guardada neste navegador. Quem usar este aparelho desbloqueado abre seus arquivos sem saber a senha.</p>
+  <div id="passErr" class="msg err hide"></div>
+  <div class="actions">
+    <button type="button" class="btn quiet js-cancel">Cancelar</button>
+    <button class="btn" id="passOk" value="ok">Desbloquear</button>
+  </div>
+</form></dialog>
+
+<dialog id="dlgAccount"><div class="dlg">
+  <h3>Conta e drive</h3>
+  <p class="hint" id="accWho"></p>
+  <div id="accDrive" class="msg"></div>
+
+  <h4>Criptografia dos arquivos</h4>
+  <p class="hint">
+    Desligada, qualquer instalação do TeleDrive — Windows, Mac, Linux, Android —
+    abre este drive normalmente. É assim que o app original vem de fábrica.
+    Ligada, só os aparelhos com a mesma chave conseguem ler os arquivos.
+  </p>
+
+  <label class="check">
+    <input id="cfgEncrypt" type="checkbox" />
+    <span>Cifrar os próximos envios</span>
+  </label>
+  <p class="warn hide" id="encNeedsKey">Crie ou importe uma chave antes de ligar.</p>
+
+  <div class="row-actions">
+    <button class="btn quiet" id="btnMakeKey">Criar chave</button>
+    <button class="btn quiet" id="btnImportKey">Importar chave</button>
+    <button class="btn quiet hide" id="btnExportKey">Baixar backup</button>
+  </div>
+
+  <h4>Ao remover</h4>
+  <label class="check">
+    <input id="cfgConfirmDelete" type="checkbox" />
+    <span>Perguntar antes de mover para a lixeira</span>
+  </label>
+  <p class="hint" style="margin-top:8px">
+    Desligado, arquivos e pastas vão direto para a lixeira, de onde dá para
+    restaurar. Apagar de vez sempre pergunta, porque não tem volta.
+  </p>
+
+  <h4>Atalhos de teclado</h4>
+  <dl class="keys">
+    <dt>/</dt><dd>buscar</dd>
+    <dt>Ctrl A</dt><dd>selecionar tudo</dd>
+    <dt>F2</dt><dd>renomear</dd>
+    <dt>Delete</dt><dd>mover para a lixeira</dd>
+    <dt>Enter</dt><dd>abrir</dd>
+    <dt>Esc</dt><dd>limpar seleção</dd>
+  </dl>
+
+  <div class="actions" style="justify-content:space-between">
+    <button class="btn quiet" id="btnForget">Trancar agora</button>
+    <button class="btn danger" id="btnLogout">Sair</button>
+  </div>
+</div></dialog>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
