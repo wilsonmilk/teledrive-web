@@ -3,9 +3,11 @@ import * as TG from './tg.js';
 import * as M from './manifest.js';
 import { ICON, iconFor, kindOf, isPreviewable, isStreamable } from './icons.js';
 import { iniciarStreaming, abrirStream, fecharStream, podeStreamar } from './stream.js';
+import { fonteEmClaro, fonteCifrada } from './upload.js';
+import * as Hist from './history.js';
 import {
   createKeyBackup, encodeKeyBackup, decodeKeyBackup, readKeyBackupHint,
-  encryptBytes, decryptBytes, BACKUP_FILE_NAME,
+  decryptBytes, BACKUP_FILE_NAME,
 } from './crypto.js';
 
 const $ = (id) => document.getElementById(id);
@@ -232,6 +234,7 @@ async function enterDrive() {
     console.warn('streaming indisponível:', err);
   });
 
+  atualizarAvisoHistorico();
   $('sortBy').value = state.sort.by;
   syncSortButtons();
   await reload();
@@ -1358,8 +1361,7 @@ function drawQueue() {
 
 /* ------------------------------- envio ---------------------------------- */
 
-const ENCRYPT_MEMORY_LIMIT = 200 * 1024 * 1024;
-const TELEGRAM_FILE_LIMIT = 2 * 1024 * 1024 * 1024;
+const TELEGRAM_FILE_LIMIT = 2 * 1024 * 1024 * 1024;   // 4 GB com Premium
 
 function entriesFromDrop(dataTransfer) {
   const roots = [...(dataTransfer.items || [])]
@@ -1383,6 +1385,54 @@ function entriesFromDrop(dataTransfer) {
   return (async () => { for (const r of roots) await walk(r, ''); return out; })();
 }
 
+/** Arquivo já existente com o mesmo nome na mesma pasta, se houver. */
+function acharDuplicado(nome, pasta) {
+  const p = M.normalizePath(pasta);
+  return state.items.find((it) =>
+    !it.man.tr && !it.man.locked
+    && (it.man.n || '') === nome
+    && M.normalizePath(it.man.p) === p) || null;
+}
+
+/**
+ * Pergunta o que fazer com um arquivo que já existe. Devolve
+ * { acao: 'pular' | 'substituir' | 'manter' | 'cancelar', todos: boolean }.
+ */
+function perguntarDuplicado(file, existente, restantes) {
+  const dlg = $('dlgDup');
+  const mesmoTamanho = Number(existente.man.s || 0) === file.size;
+
+  $('dupName').textContent = file.name;
+  $('dupWhere').textContent = M.normalizePath(existente.man.p);
+  $('dupExisting').textContent =
+    `${humanSize(existente.man.s || 0)} · ${humanDate(existente.man.mt || existente.man.ct)}`;
+  $('dupIncoming').textContent = humanSize(file.size);
+  $('dupSame').textContent = mesmoTamanho
+    ? 'Mesmo tamanho — quase certamente é o mesmo arquivo, já copiado.'
+    : 'Tamanhos diferentes — o do drive pode ter ficado incompleto.';
+  $('dupSame').className = mesmoTamanho ? 'warn ok-note' : 'warn';
+  $('dupCount').textContent = restantes > 1
+    ? `Este é o 1º de ${restantes} arquivos que já existem no destino.`
+    : '';
+  $('dupCount').classList.toggle('hide', restantes <= 1);
+  $('dupAll').checked = restantes > 1;
+
+  const d = deferred();
+  const fechar = (acao) => {
+    dlg.returnValue = acao;
+    dlg.close(acao);
+  };
+  dlg.querySelectorAll('[data-dup]').forEach((b) => {
+    b.onclick = () => fechar(b.dataset.dup);
+  });
+  dlg.onclose = () => d.resolve({
+    acao: dlg.returnValue && dlg.returnValue !== 'cancel' ? dlg.returnValue : 'cancelar',
+    todos: $('dupAll').checked,
+  });
+  dlg.showModal();
+  return d.promise;
+}
+
 async function uploadEntries(entries) {
   const files = entries.filter((e) => e.file);
   if (!files.length) return;
@@ -1394,31 +1444,68 @@ async function uploadEntries(entries) {
   }
   const destBase = state.cwd;
 
-  for (const { file, relPath } of files) {
+  // Resolve o destino de cada arquivo antes de qualquer envio, para saber
+  // de uma vez quantos já existem e poder decidir em bloco.
+  const planejados = files.map(({ file, relPath }) => {
     const rel = relPath || '';
     const relDir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '';
-    const destFolder = relDir ? M.joinPath(destBase, relDir) : destBase;
+    return { file, rel, destFolder: relDir ? M.joinPath(destBase, relDir) : destBase };
+  });
+
+  let duplicadosRestantes = planejados.filter((x) => acharDuplicado(x.file.name, x.destFolder)).length;
+  let decisaoGeral = null;   // escolha aplicada a todos, quando pedida
+
+  for (const { file, rel, destFolder } of planejados) {
+    const existente = acharDuplicado(file.name, destFolder);
+    let substituir = null;
+
+    if (existente) {
+      let acao = decisaoGeral;
+      if (!acao) {
+        const r = await perguntarDuplicado(file, existente, duplicadosRestantes);
+        acao = r.acao;
+        if (r.todos && acao !== 'cancelar') decisaoGeral = acao;
+      }
+      duplicadosRestantes--;
+
+      if (acao === 'cancelar') return;
+      if (acao === 'pular') {
+        Hist.registrar({
+          nome: file.name, caminho: destFolder, tamanho: file.size,
+          estado: Hist.ESTADOS.pulado, motivo: 'já existia no destino',
+        });
+        continue;
+      }
+      if (acao === 'substituir') substituir = existente;
+      // 'manter' segue adiante e cria um segundo arquivo com o mesmo nome
+    }
 
     enqueue(rel || file.name, async (job) => {
       if (file.size > TELEGRAM_FILE_LIMIT) {
         job.status = 'falhou';
         job.note = `${humanSize(file.size)} passa do limite de 2 GB por arquivo`;
+        Hist.registrar({
+          nome: file.name, caminho: destFolder, tamanho: file.size,
+          estado: Hist.ESTADOS.grande, motivo: 'acima do limite de 2 GB do Telegram',
+        });
+        atualizarAvisoHistorico();
         return;
       }
-      let payload = file;
-      const willEncrypt = !!key;
 
-      if (willEncrypt) {
-        if (file.size > ENCRYPT_MEMORY_LIMIT) {
-          job.status = 'falhou';
-          job.note = `${humanSize(file.size)} é grande demais para cifrar no navegador`;
-          return;
-        }
-        jobProgress(job, 5, 'cifrando');
-        const plain = new Uint8Array(await file.arrayBuffer());
-        payload = await encryptBytes(key, plain, (d, t) => jobProgress(job, 5 + (d / t) * 25, 'cifrando'));
+      // O Telegram não aceita documento sem conteúdo; melhor dizer isso do
+      // que deixar vazar um erro de API sem explicação.
+      if (file.size === 0) {
+        job.status = 'falhou';
+        job.note = 'arquivo vazio — o Telegram não aceita documento de 0 byte';
+        Hist.registrar({
+          nome: file.name, caminho: destFolder, tamanho: 0,
+          estado: Hist.ESTADOS.falhou, motivo: 'arquivo vazio (0 byte)',
+        });
+        atualizarAvisoHistorico();
+        return;
       }
 
+      const willEncrypt = !!key;
       if (destFolder !== destBase) { state.localFolders.add(destFolder); saveFolders(); }
 
       const man = M.newManifest({
@@ -1428,18 +1515,47 @@ async function uploadEntries(entries) {
       const caption = await M.encode(man, willEncrypt ? key : null);
       const wireName = willEncrypt ? `${man.id}.tde` : file.name;
 
-      // Ler um arquivo grande do disco para a memória leva tempo e não emite
-      // progresso nenhum. Sem este aviso a fila parece travada.
-      if (!willEncrypt) jobProgress(job, 0, `lendo ${humanSize(file.size)} do disco`);
+      // A fonte entrega os bytes sob demanda, fatia por fatia. Nada aqui
+      // carrega o arquivo inteiro na memória, nem para cifrar.
+      const fonte = willEncrypt
+        ? fonteCifrada(file, key, (d, t) => jobProgress(job, (d / t) * 8, 'cifrando'))
+        : fonteEmClaro(file);
 
-      await TG.uploadFile(state.client, state.drive.entity, {
-        data: payload, name: wireName, caption,
-        onProgress: (sent, total) => {
-          const base = willEncrypt ? 30 : 0;
-          jobProgress(job, base + (sent / total) * (100 - base), 'enviando');
-        },
+      try {
+        await TG.uploadFile(state.client, state.drive.entity, {
+          fonte, name: wireName, caption,
+          cancelado: () => job.status === 'cancelado',
+          onProgress: (sent, total) =>
+            jobProgress(job, (sent / total) * 100, willEncrypt ? 'cifrando e enviando' : 'enviando'),
+        });
+      } catch (err) {
+        Hist.registrar({
+          nome: file.name, caminho: destFolder, tamanho: file.size,
+          estado: Hist.ESTADOS.falhou, motivo: humanError(err),
+        });
+        atualizarAvisoHistorico();
+        throw err;
+      }
+
+      // A troca só acontece depois que o novo subiu: se o envio falhar, o
+      // arquivo antigo continua lá.
+      if (substituir) {
+        jobProgress(job, 100, 'removendo a versão antiga');
+        try {
+          await TG.deleteMessages(state.client, state.drive.entity, [substituir.msgId]);
+          state.items = state.items.filter((x) => x.msgId !== substituir.msgId);
+        } catch { /* o novo já está salvo; o antigo some no próximo Atualizar */ }
+      }
+
+      Hist.registrar({
+        nome: file.name, caminho: destFolder, tamanho: file.size,
+        estado: substituir ? Hist.ESTADOS.substituido : Hist.ESTADOS.enviado,
+        motivo: willEncrypt ? 'cifrado' : '',
       });
-      job.note = willEncrypt ? 'enviado e cifrado' : 'enviado';
+      atualizarAvisoHistorico();
+      job.note = substituir
+        ? 'substituído'
+        : (willEncrypt ? 'enviado e cifrado' : 'enviado');
     });
   }
 }
@@ -1503,6 +1619,78 @@ $('folderPicker').onchange = (e) => {
 $('btnNewFolder').onclick = () => newFolder();
 $('btnReload').onclick = () => reload();
 $('btnUnlock').onclick = () => requireKey();
+
+/* ---------------------------- histórico ---------------------------- */
+
+let histFiltro = 'problemas';
+
+/** Marca no botão quantos itens precisam de atenção. */
+function atualizarAvisoHistorico() {
+  const n = Hist.listar('problemas').length;
+  const selo = $('histBadge');
+  selo.textContent = n > 99 ? '99+' : String(n);
+  selo.classList.toggle('hide', n === 0);
+}
+
+function desenharHistorico() {
+  // Redesenhar é também a hora de reconferir o selo: assim ele fica certo
+  // depois de limpar a lista ou de um envio que correu em outra aba.
+  atualizarAvisoHistorico();
+
+  const ul = $('histList');
+  ul.innerHTML = '';
+  const itens = Hist.listar(histFiltro);
+
+  if (!itens.length) {
+    const li = document.createElement('li');
+    li.innerHTML = '<span class="vazio"></span>';
+    li.querySelector('.vazio').textContent = histFiltro === 'problemas'
+      ? 'Nenhum problema registrado. Tudo que você enviou passou.'
+      : 'Nada registrado ainda.';
+    ul.appendChild(li);
+    return;
+  }
+
+  const tom = {
+    [Hist.ESTADOS.enviado]: 'bom',
+    [Hist.ESTADOS.substituido]: 'bom',
+    [Hist.ESTADOS.pulado]: 'neutro',
+    [Hist.ESTADOS.grande]: 'ruim',
+    [Hist.ESTADOS.falhou]: 'ruim',
+  };
+
+  for (const x of itens) {
+    const li = document.createElement('li');
+    li.innerHTML = '<span class="hname"></span><span class="htag"></span><span class="hmeta"></span>';
+    li.querySelector('.hname').textContent = x.n;
+    const tag = li.querySelector('.htag');
+    tag.textContent = x.e;
+    tag.classList.add(tom[x.e] || 'neutro');
+    li.querySelector('.hmeta').textContent =
+      [humanSize(x.s), x.p, humanDate(x.t, true), x.m].filter(Boolean).join('  ·  ');
+    ul.appendChild(li);
+  }
+}
+
+$('btnHistory').onclick = () => { desenharHistorico(); $('dlgHistory').showModal(); };
+$('histClose').onclick = () => $('dlgHistory').close();
+$('histExport').onclick = () => {
+  const texto = new TextEncoder().encode(Hist.exportarTexto());
+  saveBlob(texto, 'teledrive-historico.txt', 'text/plain;charset=utf-8');
+};
+$('histClear').onclick = () => {
+  if (!confirm('Apagar todo o histórico de envios?\n\nIsso não mexe nos seus arquivos — só na lista.')) return;
+  Hist.limpar();
+  atualizarAvisoHistorico();
+  desenharHistorico();
+};
+$('histFilters').querySelectorAll('[data-hf]').forEach((b) => {
+  b.onclick = () => {
+    histFiltro = b.dataset.hf;
+    $('histFilters').querySelectorAll('[data-hf]').forEach((o) => o.classList.toggle('on', o === b));
+    desenharHistorico();
+  };
+});
 
 $('btnFav').onclick = () => {
   state.scope = state.scope === 'fav' ? 'drive' : 'fav';

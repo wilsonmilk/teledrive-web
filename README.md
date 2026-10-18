@@ -87,6 +87,16 @@ armazenamento separados**. Logar em um não loga no outro.
   botão direito, recriando a estrutura de subpastas.
 - **Fila de transferências** com progresso, cancelar os pendentes e repetir os
   que falharam.
+- **Envio em pedaços**: cada parte é lida do disco só na hora de subir, então
+  a memória usada não cresce com o tamanho do arquivo. Vale também para
+  cifrar, que acontece bloco a bloco enquanto o envio corre.
+- **Duplicados**: ao reenviar uma pasta, arquivos que já existem no destino
+  param e perguntam — pular, substituir ou manter os dois — com a opção de
+  aplicar a mesma escolha a todos os próximos. O diálogo compara os tamanhos,
+  então dá para ver de relance se já foi copiado.
+- **Histórico de envios** guardado no navegador, com filtro para o que passou
+  de 2 GB ou falhou, e exportação em texto. A fila some ao ser fechada; o
+  histórico não.
 - **Lista e grade**, com miniatura real das imagens carregada sob demanda e
   ícone colorido por tipo de arquivo.
 - **Abrir sem baixar**: imagens e PDFs abrem num visualizador, e **vídeo e
@@ -157,9 +167,9 @@ nesse caso o app avisa e segue para o próximo em vez de abortar tudo.
 - Miniatura de arquivo cifrado — o Telegram só vê bytes embaralhados
 - Cancelar uma transferência já em andamento (só as que estão na fila)
 
-Arquivos acima de 200 MB não são cifrados no navegador: montar tudo na memória
-trava a aba. Sem criptografia o envio é transmitido direto, sem esse limite.
-Resolver isso exige processar em pedaços gravando no IndexedDB.
+Arquivos acima de 2 GB são recusados pelo Telegram (4 GB com Premium) e ficam
+registrados no histórico para você reencontrá-los depois. Arquivos de 0 byte
+também não sobem: o Telegram não aceita documento sem conteúdo.
 
 ## Pilha
 

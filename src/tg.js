@@ -8,7 +8,7 @@
 
 import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
-import { CustomFile } from 'telegram/client/uploads.js';
+import { enviarEmPedacos } from './upload.js';
 
 export const DRIVE_TITLE = 'TeleDrive';
 export const DRIVE_MARKER = '#teledrive-storage';
@@ -103,51 +103,27 @@ export async function fetchDocuments(client, entity, { limit = 500 } = {}) {
 }
 
 /**
- * Envia um arquivo.
+ * Envia um arquivo a partir de uma fonte de bytes (ver upload.js).
  *
- * Duas sutilezas:
- *
- * 1. O GramJS recusa um `File` do navegador: na validação ele cai num ramo
- *    que tenta tratá-lo como objeto da API do Telegram, falha, e devolve
- *    "Cannot use [object File] as file." Embrulhar em `CustomFile` — um tipo
- *    que a validação reconhece — é o caminho que funciona.
- *
- * 2. `forceDocument` é obrigatório: o TeleDrive só indexa mensagens enviadas
- *    como documento; foto ou áudio comprimido pelo Telegram seria ignorado,
- *    além de estragar os bytes de um arquivo cifrado.
+ * `forceDocument` é obrigatório: o TeleDrive só indexa mensagens enviadas
+ * como documento; foto ou áudio recomprimido pelo Telegram seria ignorado,
+ * além de estragar os bytes de um arquivo cifrado.
  */
-export async function uploadFile(client, entity, { data, name, caption, onProgress }) {
-  const bytes = data instanceof Uint8Array
-    ? data
-    : new Uint8Array(await data.arrayBuffer());
-
-  // Um Uint8Array basta: o próprio GramJS faz Buffer.from() em cima dele.
-  // Evita depender de `Buffer` global, que não existe no navegador.
-  const file = new CustomFile(name, bytes.length, '', bytes);
-
-  // 3. O envio é feito em duas etapas de propósito.
+export async function uploadFile(client, entity, { fonte, name, caption, onProgress, cancelado }) {
+  // O envio é feito em duas etapas de propósito.
   //
-  //    Pelo sendFile, arquivos acima de 20 MB quebram: o GramJS decide ler
-  //    do disco quando `fileSize > maxBufferSize`, e usa o `path` do
-  //    CustomFile — que no navegador é vazio, porque não existe caminho de
-  //    disco. O erro que aparece é "Either one of `buffer` or `filePath`
-  //    should be specified".
-  //
-  //    O `maxBufferSize` conserta isso, mas o sendFile não repassa esse
-  //    parâmetro. Então subimos o arquivo direto pelo uploadFile, onde ele
-  //    é aceito, e mandamos a mensagem depois com o identificador pronto.
-  const handle = await client.uploadFile({
-    file,
-    workers: 1,
-    maxBufferSize: bytes.length + 1,   // garante o caminho em memória
-    onProgress: (p) => onProgress?.(Math.round(p * bytes.length), bytes.length),
-  });
+  // O `uploadFile` do GramJS exige o arquivo inteiro em memória: acima de
+  // 20 MB ele tenta ler de um `filePath`, que no navegador não existe, e
+  // forçá-lo ao caminho em memória aloca o arquivo duas vezes e trava a
+  // aba. Então subimos parte por parte, lendo cada fatia do disco na hora
+  // (ver upload.js), e só depois mandamos a mensagem com o identificador
+  // pronto — nesse formato o nome precisa vir explícito nos atributos.
+  const handle = await enviarEmPedacos(client, { fonte, name, onProgress, cancelado });
 
   return client.sendFile(entity, {
     file: handle,
     caption,
     forceDocument: true,
-    // Com o arquivo já enviado, o nome precisa vir explícito.
     attributes: [new Api.DocumentAttributeFilename({ fileName: name })],
   });
 }

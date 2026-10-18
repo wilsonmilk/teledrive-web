@@ -144,6 +144,7 @@
     <button id="btnFav" class="btn quiet">Favoritos</button>
     <button id="btnTrash" class="btn quiet">Lixeira</button>
     <button id="btnEmptyTrash" class="btn danger hide">Esvaziar lixeira</button>
+    <button id="btnHistory" class="btn quiet">Histórico<span id="histBadge" class="badge hide"></span></button>
     <button id="btnReload" class="btn quiet">Atualizar</button>
   </div>
 
@@ -248,6 +249,56 @@
     <button class="btn" id="passOk" value="ok">Desbloquear</button>
   </div>
 </form></dialog>
+
+<dialog id="dlgDup"><div class="dlg">
+  <h3>Esse arquivo já existe</h3>
+  <p class="hint"><strong id="dupName"></strong><br>já está em <code id="dupWhere"></code></p>
+
+  <dl class="cmp">
+    <dt>No drive</dt><dd id="dupExisting"></dd>
+    <dt>Enviando</dt><dd id="dupIncoming"></dd>
+  </dl>
+  <p class="warn" id="dupSame"></p>
+  <p class="hint hide" id="dupCount"></p>
+
+  <label class="check">
+    <input id="dupAll" type="checkbox" />
+    <span>Fazer o mesmo com todos os próximos</span>
+  </label>
+
+  <div class="actions dup-actions">
+    <button class="btn quiet" data-dup="cancelar">Cancelar tudo</button>
+    <span class="spacer"></span>
+    <button class="btn quiet" data-dup="manter">Manter os dois</button>
+    <button class="btn quiet danger" data-dup="substituir">Substituir</button>
+    <button class="btn" data-dup="pular">Pular</button>
+  </div>
+</div></dialog>
+
+<dialog id="dlgHistory"><div class="dlg wide">
+  <h3>Histórico de envios</h3>
+  <p class="hint">
+    Fica guardado neste navegador mesmo depois de fechar a fila. É aqui que
+    você reencontra o que passou de 2 GB ou falhou no meio de uma cópia grande.
+  </p>
+
+  <div class="row-actions" id="histFilters">
+    <button class="btn quiet on" data-hf="problemas">Só problemas</button>
+    <button class="btn quiet" data-hf="grande demais">Acima de 2 GB</button>
+    <button class="btn quiet" data-hf="pulado">Pulados</button>
+    <button class="btn quiet" data-hf="tudo">Tudo</button>
+  </div>
+
+  <ul class="hist" id="histList"></ul>
+
+  <div class="actions" style="justify-content:space-between">
+    <button class="btn quiet danger" id="histClear">Limpar histórico</button>
+    <div>
+      <button class="btn quiet" id="histExport">Baixar como texto</button>
+      <button class="btn" id="histClose">Fechar</button>
+    </div>
+  </div>
+</div></dialog>
 
 <dialog id="dlgAccount"><div class="dlg">
   <h3>Conta e drive</h3>
