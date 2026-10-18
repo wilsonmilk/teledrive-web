@@ -275,8 +275,12 @@
   </div>
 </div></dialog>
 
-<dialog id="dlgHistory"><div class="dlg wide">
-  <h3>Histórico de envios</h3>
+<dialog id="dlgHistory"><div class="dlg wide framed">
+  <header class="dlg-head">
+    <h3>Histórico de envios</h3>
+    <button class="btn bare dlg-x" id="histX" aria-label="Fechar"></button>
+  </header>
+  <div class="dlg-body">
   <p class="hint">
     Fica guardado neste navegador mesmo depois de fechar a fila. É aqui que
     você reencontra o que passou de 2 GB ou falhou no meio de uma cópia grande.
@@ -291,17 +295,21 @@
 
   <ul class="hist" id="histList"></ul>
 
-  <div class="actions" style="justify-content:space-between">
-    <button class="btn quiet danger" id="histClear">Limpar histórico</button>
-    <div>
-      <button class="btn quiet" id="histExport">Baixar como texto</button>
-      <button class="btn" id="histClose">Fechar</button>
-    </div>
   </div>
+  <footer class="dlg-foot">
+    <button class="btn quiet danger" id="histClear">Limpar histórico</button>
+    <span class="spacer"></span>
+    <button class="btn quiet" id="histExport">Baixar como texto</button>
+    <button class="btn" id="histClose">Fechar</button>
+  </footer>
 </div></dialog>
 
-<dialog id="dlgAccount"><div class="dlg">
-  <h3>Conta e drive</h3>
+<dialog id="dlgAccount"><div class="dlg framed">
+  <header class="dlg-head">
+    <h3>Conta e drive</h3>
+    <button class="btn bare dlg-x" id="accClose" aria-label="Fechar"></button>
+  </header>
+  <div class="dlg-body">
   <p class="hint" id="accWho"></p>
   <div id="accDrive" class="msg"></div>
 
@@ -334,8 +342,8 @@
     restaurar. Apagar de vez sempre pergunta, porque não tem volta.
   </p>
 
-  <h4>Atalhos de teclado</h4>
-  <dl class="keys">
+  <h4 class="only-keyboard">Atalhos de teclado</h4>
+  <dl class="keys only-keyboard">
     <dt>/</dt><dd>buscar</dd>
     <dt>Ctrl A</dt><dd>selecionar tudo</dd>
     <dt>F2</dt><dd>renomear</dd>
@@ -344,10 +352,12 @@
     <dt>Esc</dt><dd>limpar seleção</dd>
   </dl>
 
-  <div class="actions" style="justify-content:space-between">
-    <button class="btn quiet" id="btnForget">Trancar agora</button>
-    <button class="btn danger" id="btnLogout">Sair</button>
   </div>
+  <footer class="dlg-foot">
+    <button class="btn quiet" id="btnForget">Trancar agora</button>
+    <span class="spacer"></span>
+    <button class="btn danger" id="btnLogout">Sair</button>
+  </footer>
 </div></dialog>
 
 <script type="module" src="/src/main.js"></script>
