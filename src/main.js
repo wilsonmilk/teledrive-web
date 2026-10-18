@@ -1674,6 +1674,10 @@ function desenharHistorico() {
 
 $('btnHistory').onclick = () => { desenharHistorico(); $('dlgHistory').showModal(); };
 $('histClose').onclick = () => $('dlgHistory').close();
+$('histX').innerHTML = ICON.close;
+$('histX').onclick = () => $('dlgHistory').close();
+$('accClose').innerHTML = ICON.close;
+$('accClose').onclick = () => $('dlgAccount').close();
 $('histExport').onclick = () => {
   const texto = new TextEncoder().encode(Hist.exportarTexto());
   saveBlob(texto, 'teledrive-historico.txt', 'text/plain;charset=utf-8');
@@ -1773,9 +1777,11 @@ $('xferCancelAll').onclick = () => {
 };
 
 function refreshAccountDialog() {
-  $('accWho').textContent = state.me
+  const quem = state.me
     ? `${[state.me.firstName, state.me.lastName].filter(Boolean).join(' ')}${state.me.username ? ` (@${state.me.username})` : ''}`
     : '';
+  $('accWho').textContent = quem;
+  $('accWho').classList.toggle('hide', !quem);
   const kept = !!store.get(KEY.remembered);
   const chave = !state.hasKey ? 'nenhuma chave neste navegador'
     : state.contentKey ? (kept ? 'aberta e guardada aqui' : 'aberta nesta sessão')
