@@ -174,6 +174,61 @@ export async function decodeKeyBackup(blob, passphrase) {
 
 /* --------------------- arquivos (stream) --------------------- */
 
+/**
+ * Tamanho final de um arquivo cifrado, sem precisar cifrá-lo.
+ *
+ * É determinístico: cabeçalho fixo, mais 4 bytes de cabeçalho e 16 de
+ * autenticação por bloco. Saber isso de antemão é o que permite enviar
+ * cifrado em pedaços, porque o Telegram exige o total de partes antes
+ * do primeiro byte subir.
+ */
+export function encryptedSizeOf(plainSize) {
+  const blocos = Math.max(1, Math.ceil(plainSize / CHUNK_SIZE));
+  return MAGIC.length + 1 + SALT_LENGTH + blocos * (4 + TAG_BITS / 8) + plainSize;
+}
+
+export const PLAIN_CHUNK_SIZE = CHUNK_SIZE;
+
+/**
+ * Cifra um Blob progressivamente, lendo um bloco de 1 MB por vez direto do
+ * disco. Nunca segura o arquivo inteiro na memória — é o que diferencia
+ * cifrar um vídeo de 2 GB de travar a aba.
+ *
+ * Produz exatamente os mesmos bytes que encryptBytes, na mesma ordem.
+ */
+export async function* encryptBlobStream(contentKey, blob, onProgress) {
+  const key = await importAesKey(contentKey);
+  const salt = randomBytes(SALT_LENGTH);
+
+  yield concat(MAGIC, new Uint8Array([VERSION]), salt);
+
+  const total = blob.size;
+  const blocos = Math.max(1, Math.ceil(total / CHUNK_SIZE));
+
+  for (let i = 0; i < blocos; i++) {
+    const inicio = i * CHUNK_SIZE;
+    const fim = Math.min(inicio + CHUNK_SIZE, total);
+    const plain = new Uint8Array(await blob.slice(inicio, fim).arrayBuffer());
+    const ultimo = i === blocos - 1;
+
+    const sealed = new Uint8Array(
+      await crypto.subtle.encrypt(
+        {
+          name: 'AES-GCM',
+          iv: nonceFor(salt, i),
+          additionalData: aadFor(i, ultimo),
+          tagLength: TAG_BITS,
+        },
+        key,
+        plain,
+      ),
+    );
+    yield u32(ultimo ? (sealed.length | FINAL_FLAG) : sealed.length);
+    yield sealed;
+    onProgress?.(fim, total);
+  }
+}
+
 /** Cifra os bytes inteiros no formato TDE1. */
 export async function encryptBytes(contentKey, plain, onProgress) {
   return encryptBytesWithKey(await importAesKey(contentKey), plain, onProgress);

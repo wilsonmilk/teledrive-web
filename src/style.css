@@ -658,3 +658,77 @@ dl.keys dd { margin: 0; color: var(--slate); }
 /* player dentro do visualizador */
 .viewer-body video { max-width: 100%; max-height: 100%; border-radius: var(--r-sm); background: #000; }
 .viewer-body audio { width: min(560px, 100%); }
+
+/* ============ duplicados e histórico ============ */
+
+/* Larguras por conteúdo: o diálogo de duplicado precisa caber quatro
+   ações numa linha só, e o histórico é uma lista. */
+#dlgDup { width: min(540px, calc(100vw - 32px)); }
+#dlgHistory { width: min(640px, calc(100vw - 32px)); }
+
+/* comparação entre o que está no drive e o que chega */
+dl.cmp {
+  display: grid; grid-template-columns: auto 1fr; gap: 6px 14px;
+  margin: 14px 0 10px; padding: 12px;
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--r);
+  font-size: 13.5px;
+}
+dl.cmp dt { color: var(--slate); }
+dl.cmp dd { margin: 0; font-family: 'IBM Plex Mono', monospace; }
+
+/* o aviso vira verde quando os tamanhos batem: é o caso bom, não um alerta */
+.warn.ok-note {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+
+.dup-actions { flex-wrap: nowrap; }
+.dup-actions .spacer { flex: 1; }
+.dup-actions .btn { padding: 10px 14px; font-size: 14px; }
+
+@media (max-width: 560px) {
+  /* Sem espaço para uma linha só, empilha com a ação principal embaixo,
+     ao alcance do polegar. */
+  .dup-actions { flex-wrap: wrap-reverse; justify-content: stretch; }
+  .dup-actions .btn { flex: 1 1 auto; }
+  .dup-actions .spacer { display: none; }
+}
+
+/* contador no botão de histórico */
+.badge {
+  display: inline-grid; place-items: center; min-width: 17px; height: 17px;
+  margin-left: 6px; padding: 0 5px;
+  font-size: 11px; font-family: 'IBM Plex Mono', monospace;
+  background: var(--danger); color: #fff; border-radius: 999px;
+}
+
+ul.hist {
+  list-style: none; margin: 14px 0; padding: 0;
+  max-height: 46vh; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--paper);
+}
+ul.hist li {
+  display: grid; grid-template-columns: 1fr auto; gap: 4px 12px;
+  padding: 10px 12px; border-bottom: 1px solid var(--line);
+}
+ul.hist li:last-child { border-bottom: 0; }
+.hist .hname {
+  font-size: 13.5px; word-break: break-word;
+}
+.hist .hmeta {
+  grid-column: 1 / -1;
+  font-size: 11.5px; color: var(--faint);
+  font-family: 'IBM Plex Mono', monospace;
+}
+.hist .htag {
+  font-size: 11px; padding: 2px 8px; border-radius: 999px; height: fit-content;
+  font-family: 'IBM Plex Mono', monospace; white-space: nowrap;
+  background: var(--raised); color: var(--slate);
+}
+.hist .htag.ruim { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
+.hist .htag.bom  { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+.hist .htag.neutro { background: var(--lock-soft); color: var(--lock); }
+.hist .vazio { display: block; padding: 28px 16px; text-align: center; color: var(--slate); font-size: 14px; }
+
+#histFilters .btn { font-size: 13px; padding: 6px 11px; }
